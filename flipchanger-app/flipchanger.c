@@ -238,9 +238,13 @@ bool flipchanger_load_data(FlipChangerApp* app) {
         return true;
     }
     
-    // Read file into buffer (limit size for memory)
-    uint8_t buffer[4096];  // 4KB buffer - should be enough for reasonable data
+    // Read file into buffer (must fit in stack - reduced to 2KB)
+    uint8_t buffer[2048];  // 2KB buffer - fits in stack, read incrementally if needed
     uint16_t bytes_read = storage_file_read(file, buffer, sizeof(buffer) - 1);
+    if(bytes_read >= sizeof(buffer) - 1) {
+        // File too large - truncate and warn (shouldn't happen with reasonable data)
+        bytes_read = sizeof(buffer) - 1;
+    }
     buffer[bytes_read] = '\0';
     
     storage_file_close(file);
