@@ -10,6 +10,9 @@
 #include <m-array.h>
 #include <stream/stream.h>
 #include <stream/buffered_file_stream.h>
+#include <storage/storage.h>
+#include <furi.h>
+#include <string.h>
 
 // Initialize slots (only cache in memory, full data on SD card)
 void flipchanger_init_slots(FlipChangerApp* app, int32_t total_slots) {
@@ -32,20 +35,27 @@ void flipchanger_init_slots(FlipChangerApp* app, int32_t total_slots) {
 
 // Load slot from SD card into cache
 bool flipchanger_load_slot_from_sd(FlipChangerApp* app, int32_t slot_index) {
-    // TODO: Implement loading slot from SD card JSON file
-    // For now, return false (slot not loaded from SD)
-    UNUSED(app);
-    UNUSED(slot_index);
-    return false;
+    // For now, just reload all data (inefficient but works)
+    // TODO: Optimize to load individual slot
+    if(slot_index < 0 || slot_index >= app->total_slots) {
+        return false;
+    }
+    
+    // Reload entire file and find slot
+    // This is inefficient but safe - can optimize later
+    return flipchanger_load_data(app);
 }
 
 // Save slot to SD card
 bool flipchanger_save_slot_to_sd(FlipChangerApp* app, int32_t slot_index) {
-    // TODO: Implement saving slot to SD card JSON file
-    // For now, return false (slot not saved to SD)
-    UNUSED(app);
-    UNUSED(slot_index);
-    return false;
+    // For now, save all cached slots (efficient enough for our use case)
+    // TODO: Optimize to update single slot in file
+    if(slot_index < 0 || slot_index >= app->total_slots) {
+        return false;
+    }
+    
+    // Save all cached slots to file
+    return flipchanger_save_data(app);
 }
 
 // Get slot from cache or SD card
@@ -82,9 +92,20 @@ void flipchanger_update_cache(FlipChangerApp* app, int32_t slot_index) {
     
     // Only reload if cache needs to shift
     if(new_cache_start != app->cache_start_index) {
-        // TODO: Load slots from SD card for new cache range
-        // For now, just update the index
+        // Save current cache if dirty
+        if(app->dirty) {
+            flipchanger_save_data(app);
+        }
+        
+        // Reload data from SD card (this loads cached slots)
+        // TODO: Optimize to load only the new cache range
+        flipchanger_load_data(app);
         app->cache_start_index = new_cache_start;
+        
+        // Update slot numbers in cache
+        for(int32_t i = 0; i < SLOT_CACHE_SIZE && i < app->total_slots; i++) {
+            app->slots[i].slot_number = app->cache_start_index + i + 1;
+        }
     }
 }
 
@@ -120,40 +141,375 @@ int32_t flipchanger_count_occupied_slots(FlipChangerApp* app) {
     return count;
 }
 
-// Load data from JSON file (simplified version - will enhance later)
+// Helper: Skip whitespace in JSON
+static const char* skip_whitespace(const char* str) {
+    while(*str == ' ' || *str == '\t' || *str == '\n' || *str == '\r') {
+        str++;
+    }
+    return str;
+}
+
+// Helper: Read string value from JSON
+static const char* read_json_string(const char* json, char* buffer, size_t buffer_size) {
+    const char* p = skip_whitespace(json);
+    if(*p != '"') return NULL;
+    p++;  // Skip opening quote
+    
+    size_t i = 0;
+    while(*p && *p != '"' && i < buffer_size - 1) {
+        if(*p == '\\' && *(p + 1) == '"') {
+            buffer[i++] = '"';
+            p += 2;
+        } else {
+            buffer[i++] = *p++;
+        }
+    }
+    buffer[i] = '\0';
+    
+    if(*p == '"') p++;  // Skip closing quote
+    return p;
+}
+
+// Helper: Read integer value from JSON
+static const char* read_json_int(const char* json, int32_t* value) {
+    const char* p = skip_whitespace(json);
+    *value = 0;
+    bool negative = false;
+    
+    if(*p == '-') {
+        negative = true;
+        p++;
+    }
+    
+    while(*p >= '0' && *p <= '9') {
+        *value = *value * 10 + (*p - '0');
+        p++;
+    }
+    
+    if(negative) *value = -(*value);
+    return p;
+}
+
+// Helper: Read boolean value from JSON
+static const char* read_json_bool(const char* json, bool* value) {
+    const char* p = skip_whitespace(json);
+    if(strncmp(p, "true", 4) == 0) {
+        *value = true;
+        return p + 4;
+    } else if(strncmp(p, "false", 5) == 0) {
+        *value = false;
+        return p + 5;
+    }
+    return NULL;
+}
+
+// Helper: Find JSON key
+static const char* find_json_key(const char* json, const char* key) {
+    char key_pattern[64];
+    snprintf(key_pattern, sizeof(key_pattern), "\"%s\"", key);
+    const char* found = strstr(json, key_pattern);
+    if(!found) return NULL;
+    
+    const char* p = found + strlen(key_pattern);
+    p = skip_whitespace(p);
+    if(*p == ':') {
+        return p + 1;
+    }
+    return NULL;
+}
+
+// Load data from JSON file
 bool flipchanger_load_data(FlipChangerApp* app) {
     if(!app->storage) {
         return false;
     }
     
-    // For now, initialize with default slots (reduced for memory)
-    // TODO: Implement JSON parsing
-    flipchanger_init_slots(app, DEFAULT_SLOTS);  // Default to 20 slots to save memory
+    // Initialize with default slots
+    flipchanger_init_slots(app, DEFAULT_SLOTS);
     
     // Try to open and read file if it exists
     File* file = storage_file_alloc(app->storage);
     
-    if(storage_file_open(file, FLIPCHANGER_DATA_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
-        // File exists - for now just mark that data file exists
-        // TODO: Parse JSON
-        storage_file_close(file);
+    if(!storage_file_open(file, FLIPCHANGER_DATA_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
+        // File doesn't exist - use defaults
+        storage_file_free(file);
+        return true;
     }
     
+    // Read file into buffer (limit size for memory)
+    uint8_t buffer[4096];  // 4KB buffer - should be enough for reasonable data
+    uint16_t bytes_read = storage_file_read(file, buffer, sizeof(buffer) - 1);
+    buffer[bytes_read] = '\0';
+    
+    storage_file_close(file);
     storage_file_free(file);
+    
+    // Parse JSON
+    const char* json = (const char*)buffer;
+    const char* p = json;
+    
+    // Find version (optional)
+    p = find_json_key(json, "version");
+    if(p) {
+        int32_t version = 0;
+        p = read_json_int(p, &version);
+        // Version handling (for future compatibility)
+    }
+    
+    // Find total_slots
+    p = find_json_key(json, "total_slots");
+    if(p) {
+        int32_t total_slots = DEFAULT_SLOTS;
+        p = read_json_int(p, &total_slots);
+        if(total_slots >= MIN_SLOTS && total_slots <= MAX_SLOTS) {
+            app->total_slots = total_slots;
+        }
+    }
+    
+    // Find slots array
+    p = find_json_key(json, "slots");
+    if(!p) {
+        // No slots array - use defaults
+        return true;
+    }
+    
+    p = skip_whitespace(p);
+    if(*p != '[') {
+        return true;  // Invalid format
+    }
+    p++;  // Skip '['
+    
+    // Parse slots (limited to what we can cache)
+    int32_t slot_index = 0;
+    while(*p && slot_index < SLOT_CACHE_SIZE && slot_index < app->total_slots) {
+        p = skip_whitespace(p);
+        if(*p == ']') break;  // End of array
+        if(*p != '{') {
+            p++;
+            continue;  // Skip invalid entry
+        }
+        p++;  // Skip '{'
+        
+        Slot* slot = &app->slots[slot_index];
+        slot->slot_number = slot_index + 1;
+        slot->occupied = false;
+        memset(&slot->cd, 0, sizeof(CD));
+        slot->cd.track_count = 0;
+        
+        // Parse slot number
+        const char* slot_key = find_json_key(p, "slot");
+        if(slot_key) {
+            int32_t slot_num = 0;
+            read_json_int(slot_key, &slot_num);
+            slot->slot_number = slot_num;
+        }
+        
+        // Parse occupied
+        const char* occ_key = find_json_key(p, "occupied");
+        if(occ_key) {
+            read_json_bool(occ_key, &slot->occupied);
+        }
+        
+        if(slot->occupied) {
+            // Parse artist
+            const char* artist_key = find_json_key(p, "artist");
+            if(artist_key) {
+                read_json_string(artist_key, slot->cd.artist, MAX_ARTIST_LENGTH);
+            }
+            
+            // Parse album
+            const char* album_key = find_json_key(p, "album");
+            if(album_key) {
+                read_json_string(album_key, slot->cd.album, MAX_ALBUM_LENGTH);
+            }
+            
+            // Parse year
+            const char* year_key = find_json_key(p, "year");
+            if(year_key) {
+                read_json_int(year_key, &slot->cd.year);
+            }
+            
+            // Parse genre
+            const char* genre_key = find_json_key(p, "genre");
+            if(genre_key) {
+                read_json_string(genre_key, slot->cd.genre, MAX_GENRE_LENGTH);
+            }
+            
+            // Parse tracks array (simplified - just count for now)
+            const char* tracks_key = find_json_key(p, "tracks");
+            if(tracks_key) {
+                const char* tracks_start = skip_whitespace(tracks_key);
+                if(*tracks_start == '[') {
+                    tracks_start++;
+                    int32_t track_count = 0;
+                    const char* track_p = tracks_start;
+                    
+                    // Count tracks
+                    while(*track_p && track_count < MAX_TRACKS) {
+                        track_p = skip_whitespace(track_p);
+                        if(*track_p == ']') break;
+                        if(*track_p == '{') {
+                            // Parse track (simplified)
+                            track_count++;
+                            while(*track_p && *track_p != '}') track_p++;
+                            if(*track_p == '}') track_p++;
+                        } else {
+                            track_p++;
+                        }
+                        if(*track_p == ',') track_p++;
+                    }
+                    slot->cd.track_count = track_count;
+                }
+            }
+            
+            // Parse notes
+            const char* notes_key = find_json_key(p, "notes");
+            if(notes_key) {
+                read_json_string(notes_key, slot->cd.notes, MAX_NOTES_LENGTH);
+            }
+        }
+        
+        // Find next slot or end of array
+        while(*p && *p != '}' && *p != ']') p++;
+        if(*p == '}') p++;  // Skip '}'
+        if(*p == ',') p++;  // Skip ','
+        
+        slot_index++;
+    }
     
     return true;
 }
 
-// Save data to JSON file (simplified version - will enhance later)
+// Helper: Write JSON string (escape quotes)
+static void write_json_string(File* file, const char* str) {
+    if(!str || strlen(str) == 0) {
+        storage_file_write(file, (const uint8_t*)"\"\"", 2);
+        return;
+    }
+    
+    storage_file_write(file, (const uint8_t*)"\"", 1);
+    
+    const char* p = str;
+    while(*p) {
+        if(*p == '"' || *p == '\\') {
+            storage_file_write(file, (const uint8_t*)"\\", 1);
+        }
+        storage_file_write(file, (const uint8_t*)p, 1);
+        p++;
+    }
+    
+    storage_file_write(file, (const uint8_t*)"\"", 1);
+}
+
+// Save data to JSON file (saves cached slots)
 bool flipchanger_save_data(FlipChangerApp* app) {
     if(!app->storage) {
         return false;
     }
     
-    // TODO: Implement JSON writing
-    // For now, just mark that save was attempted
-    app->dirty = false;
+    // Open file for writing
+    File* file = storage_file_alloc(app->storage);
     
+    // Create directory if needed
+    storage_common_mkdir(app->storage, "/ext/apps/Tools");
+    
+    if(!storage_file_open(file, FLIPCHANGER_DATA_PATH, FSAM_WRITE, FSOM_CREATE_ALWAYS)) {
+        storage_file_free(file);
+        return false;
+    }
+    
+    // Write JSON header
+    char header[128];
+    snprintf(header, sizeof(header), "{\"version\":1,\"total_slots\":%ld,\"slots\":[", (long)app->total_slots);
+    storage_file_write(file, (const uint8_t*)header, strlen(header));
+    
+    // Write cached slots
+    bool first = true;
+    for(int32_t i = 0; i < SLOT_CACHE_SIZE && i < app->total_slots; i++) {
+        Slot* slot = &app->slots[i];
+        
+        if(!first) {
+            storage_file_write(file, (const uint8_t*)",", 1);
+        }
+        first = false;
+        
+        storage_file_write(file, (const uint8_t*)"{", 1);
+        
+        // Slot number
+        char slot_num[32];
+        snprintf(slot_num, sizeof(slot_num), "\"slot\":%ld,", (long)slot->slot_number);
+        storage_file_write(file, (const uint8_t*)slot_num, strlen(slot_num));
+        
+        // Occupied
+        char occ_str[24];
+        snprintf(occ_str, sizeof(occ_str), "\"occupied\":%s,", slot->occupied ? "true" : "false");
+        storage_file_write(file, (const uint8_t*)occ_str, strlen(occ_str));
+        
+        if(slot->occupied) {
+            // Artist
+            storage_file_write(file, (const uint8_t*)"\"artist\":", 9);
+            write_json_string(file, slot->cd.artist);
+            storage_file_write(file, (const uint8_t*)",", 1);
+            
+            // Album
+            storage_file_write(file, (const uint8_t*)"\"album\":", 8);
+            write_json_string(file, slot->cd.album);
+            storage_file_write(file, (const uint8_t*)",", 1);
+            
+            // Year
+            char year_str[32];
+            snprintf(year_str, sizeof(year_str), "\"year\":%ld,", (long)slot->cd.year);
+            storage_file_write(file, (const uint8_t*)year_str, strlen(year_str));
+            
+            // Genre
+            storage_file_write(file, (const uint8_t*)"\"genre\":", 8);
+            write_json_string(file, slot->cd.genre);
+            storage_file_write(file, (const uint8_t*)",", 1);
+            
+            // Tracks array
+            storage_file_write(file, (const uint8_t*)"\"tracks\":[", 10);
+            bool first_track = true;
+            for(int32_t t = 0; t < slot->cd.track_count && t < MAX_TRACKS; t++) {
+                if(!first_track) {
+                    storage_file_write(file, (const uint8_t*)",", 1);
+                }
+                first_track = false;
+                
+                storage_file_write(file, (const uint8_t*)"{", 1);
+                
+                // Track number
+                char track_num[32];
+                snprintf(track_num, sizeof(track_num), "\"num\":%ld,", (long)slot->cd.tracks[t].number);
+                storage_file_write(file, (const uint8_t*)track_num, strlen(track_num));
+                
+                // Track title
+                storage_file_write(file, (const uint8_t*)"\"title\":", 8);
+                write_json_string(file, slot->cd.tracks[t].title);
+                storage_file_write(file, (const uint8_t*)",", 1);
+                
+                // Track duration
+                storage_file_write(file, (const uint8_t*)"\"duration\":", 11);
+                write_json_string(file, slot->cd.tracks[t].duration);
+                
+                storage_file_write(file, (const uint8_t*)"}", 1);
+            }
+            storage_file_write(file, (const uint8_t*)"],", 2);
+            
+            // Notes
+            storage_file_write(file, (const uint8_t*)"\"notes\":", 8);
+            write_json_string(file, slot->cd.notes);
+        }
+        
+        storage_file_write(file, (const uint8_t*)"}", 1);
+    }
+    
+    // Write JSON footer
+    storage_file_write(file, (const uint8_t*)"]}", 2);
+    
+    storage_file_close(file);
+    storage_file_free(file);
+    
+    app->dirty = false;
     return true;
 }
 
@@ -512,6 +868,9 @@ int32_t flipchanger_main(void* p) {
     if(app->dirty) {
         flipchanger_save_data(app);
     }
+    
+    // Final save before exit
+    flipchanger_save_data(app);
     
     // Cleanup
     gui_remove_view_port(app->gui, app->view_port);
