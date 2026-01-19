@@ -87,6 +87,19 @@ typedef struct {
     bool running;
     bool dirty;                   // Data has been modified, needs save
     
+    // Add/Edit Input State
+    enum {
+        FIELD_ARTIST,
+        FIELD_ALBUM,
+        FIELD_YEAR,
+        FIELD_GENRE,
+        FIELD_NOTES,
+        FIELD_SAVE,
+        FIELD_COUNT
+    } edit_field;                 // Current field being edited
+    int32_t edit_char_pos;        // Character position in current field
+    int32_t edit_char_selection;  // Selected character (for character picker)
+    
 } FlipChangerApp;
 
 // Function declarations

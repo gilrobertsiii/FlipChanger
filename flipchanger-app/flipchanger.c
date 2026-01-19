@@ -702,8 +702,7 @@ void flipchanger_draw_callback(Canvas* canvas, void* ctx) {
             flipchanger_draw_slot_details(canvas, app);
             break;
         case VIEW_ADD_EDIT_CD:
-            // TODO: Implement add/edit view
-            flipchanger_draw_slot_details(canvas, app);
+            flipchanger_draw_add_edit(canvas, app);
             break;
         default:
             canvas_clear(canvas);
@@ -730,11 +729,175 @@ void flipchanger_show_slot_details(FlipChangerApp* app, int32_t slot_index) {
     app->current_slot_index = slot_index;
 }
 
+// Character set for text input
+static const char* CHAR_SET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-,";
+
 void flipchanger_show_add_edit(FlipChangerApp* app, int32_t slot_index, bool is_new) {
-    UNUSED(is_new);
     app->current_view = VIEW_ADD_EDIT_CD;
     app->current_slot_index = slot_index;
-    // TODO: Implement add/edit functionality
+    app->edit_field = FIELD_ARTIST;
+    app->edit_char_pos = 0;
+    app->edit_char_selection = 0;
+    
+    // Ensure slot is in cache
+    flipchanger_update_cache(app, slot_index);
+    Slot* slot = flipchanger_get_slot(app, slot_index);
+    
+    if(slot && is_new) {
+        // Initialize new slot
+        slot->occupied = true;
+        slot->slot_number = slot_index + 1;
+        memset(&slot->cd, 0, sizeof(CD));
+        slot->cd.year = 0;
+        slot->cd.track_count = 0;
+        slot->cd.artist[0] = '\0';
+        slot->cd.album[0] = '\0';
+        slot->cd.genre[0] = '\0';
+        slot->cd.notes[0] = '\0';
+    }
+}
+
+// Draw Add/Edit CD view
+void flipchanger_draw_add_edit(Canvas* canvas, FlipChangerApp* app) {
+    canvas_clear(canvas);
+    
+    if(app->current_slot_index < 0 || app->current_slot_index >= app->total_slots) {
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str(canvas, 5, 30, "Invalid slot");
+        return;
+    }
+    
+    Slot* slot = flipchanger_get_slot(app, app->current_slot_index);
+    if(!slot) {
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str(canvas, 5, 30, "Slot not loaded");
+        return;
+    }
+    
+    canvas_set_font(canvas, FontPrimary);
+    
+    // Title
+    char title[32];
+    snprintf(title, sizeof(title), "Slot %ld", (long)slot->slot_number);
+    canvas_draw_str(canvas, 5, 10, title);
+    
+    canvas_set_font(canvas, FontSecondary);
+    int32_t y = 22;
+    
+    // Field labels and values
+    const char* field_labels[] = {
+        "Artist:",
+        "Album:",
+        "Year:",
+        "Genre:",
+        "Notes:"
+    };
+    
+    char* field_values[] = {
+        slot->cd.artist,
+        slot->cd.album,
+        NULL,  // Year handled separately
+        slot->cd.genre,
+        slot->cd.notes
+    };
+    
+    // Draw fields
+    for(int32_t i = 0; i < FIELD_SAVE && i < 5; i++) {
+        bool is_selected = (app->edit_field == i);
+        
+        // Highlight selected field
+        if(is_selected) {
+            canvas_draw_box(canvas, 2, y - 9, 124, 9);
+            canvas_invert_color(canvas);
+        }
+        
+        canvas_draw_str(canvas, 5, y, field_labels[i]);
+        
+        // Draw field value
+        if(i == FIELD_YEAR) {
+            char year_str[32];
+            if(slot->cd.year > 0) {
+                snprintf(year_str, sizeof(year_str), "%ld", (long)slot->cd.year);
+            } else {
+                snprintf(year_str, sizeof(year_str), "0");
+            }
+            
+            // Show cursor for year
+            int32_t x_pos = 40;
+            canvas_draw_str(canvas, x_pos, y, year_str);
+            if(is_selected) {
+                int32_t cursor_x = x_pos + (app->edit_char_pos * 6);
+                if(cursor_x < 128) {
+                    canvas_draw_line(canvas, cursor_x, y, cursor_x, y - 8);
+                }
+                
+                // Show number picker (0-9)
+                if(app->edit_char_selection >= 26 && app->edit_char_selection < 36) {
+                    int32_t digit = app->edit_char_selection - 26;
+                    char digit_display[4];
+                    snprintf(digit_display, sizeof(digit_display), "[%ld]", (long)digit);
+                    canvas_draw_str(canvas, 100, y, digit_display);
+                }
+            }
+        } else {
+            char* value = field_values[i];
+            int32_t max_len = 0;
+            
+            // Get max length for field
+            switch(i) {
+                case FIELD_ARTIST: max_len = MAX_ARTIST_LENGTH; break;
+                case FIELD_ALBUM: max_len = MAX_ALBUM_LENGTH; break;
+                case FIELD_GENRE: max_len = MAX_GENRE_LENGTH; break;
+                case FIELD_NOTES: max_len = MAX_NOTES_LENGTH; break;
+                default: max_len = 32; break;
+            }
+            
+            // Display value (truncate if too long for display)
+            char display[64];
+            snprintf(display, sizeof(display), "%.30s", value);
+            canvas_draw_str(canvas, 40, y, display);
+            
+            // Show cursor position
+            if(is_selected) {
+                int32_t x_pos = 40 + (app->edit_char_pos * 6);
+                if(x_pos < 128) {
+                    canvas_draw_line(canvas, x_pos, y, x_pos, y - 8);
+                }
+                
+                // Show character picker (only if not navigating)
+                if(app->edit_char_selection > 0 || strlen(value) == 0 || app->edit_char_pos < (int32_t)strlen(value)) {
+                    int32_t char_idx = app->edit_char_selection % strlen(CHAR_SET);
+                    char char_display[4];
+                    snprintf(char_display, sizeof(char_display), "[%c]", CHAR_SET[char_idx]);
+                    canvas_draw_str(canvas, 100, y, char_display);
+                }
+            }
+            
+            UNUSED(max_len);  // For future use
+        }
+        
+        if(is_selected) {
+            canvas_invert_color(canvas);
+        }
+        
+        y += 10;
+    }
+    
+    // Save button
+    bool save_selected = (app->edit_field == FIELD_SAVE);
+    y = 58;
+    if(save_selected) {
+        canvas_draw_box(canvas, 2, y - 8, 124, 8);
+        canvas_invert_color(canvas);
+    }
+    canvas_draw_str(canvas, 5, y, "Save");
+    if(save_selected) {
+        canvas_invert_color(canvas);
+    }
+    
+    // Footer
+    canvas_set_font(canvas, FontKeyboard);
+    canvas_draw_str(canvas, 5, 64, "UP/DN:Field LEFT/R:Pos OK:Add BACK:Del");
 }
 
 // Input callback
@@ -812,12 +975,184 @@ void flipchanger_input_callback(InputEvent* input_event, void* ctx) {
             break;
         }
             
-        case VIEW_ADD_EDIT_CD:
-            // TODO: Handle add/edit input
-            if(input_event->key == InputKeyBack) {
-                flipchanger_show_slot_details(app, app->current_slot_index);
+        case VIEW_ADD_EDIT_CD: {
+            Slot* slot = flipchanger_get_slot(app, app->current_slot_index);
+            if(!slot) {
+                if(input_event->key == InputKeyBack) {
+                    flipchanger_show_slot_list(app);
+                }
+                break;
             }
+            
+            if(app->edit_field == FIELD_SAVE) {
+                // Save button selected
+                if(input_event->key == InputKeyOk) {
+                    // Save the slot
+                    slot->occupied = true;
+                    app->dirty = true;
+                    flipchanger_save_slot_to_sd(app, app->current_slot_index);
+                    notification_message(app->notifications, &sequence_blink_green_100);
+                    flipchanger_show_slot_details(app, app->current_slot_index);
+                } else if(input_event->key == InputKeyUp) {
+                    app->edit_field = FIELD_NOTES;
+                } else if(input_event->key == InputKeyBack) {
+                    flipchanger_show_slot_details(app, app->current_slot_index);
+                }
+            } else {
+                // Editing a field
+                if(input_event->key == InputKeyUp) {
+                    // Navigate fields or change character
+                    if(app->edit_char_selection == 0) {
+                        // Navigate to previous field
+                        if(app->edit_field > FIELD_ARTIST) {
+                            app->edit_field = app->edit_field - 1;
+                        } else {
+                            app->edit_field = FIELD_SAVE;
+                        }
+                    } else {
+                        // Change selected character (wrap around)
+                        app->edit_char_selection = (app->edit_char_selection - 1 + strlen(CHAR_SET)) % strlen(CHAR_SET);
+                    }
+                } else if(input_event->key == InputKeyDown) {
+                    // Navigate fields or change character
+                    if(app->edit_char_selection == 0) {
+                        // Navigate to next field
+                        if(app->edit_field < FIELD_SAVE) {
+                            app->edit_field = app->edit_field + 1;
+                        } else {
+                            app->edit_field = FIELD_ARTIST;
+                        }
+                    } else {
+                        // Change selected character
+                        app->edit_char_selection = (app->edit_char_selection + 1) % strlen(CHAR_SET);
+                    }
+                } else if(input_event->key == InputKeyLeft) {
+                    // Move cursor left
+                    if(app->edit_char_pos > 0) {
+                        app->edit_char_pos--;
+                        app->edit_char_selection = 0;
+                    }
+                } else if(input_event->key == InputKeyRight) {
+                    // Move cursor right
+                    char* field = NULL;
+                    int32_t max_len = 0;
+                    
+                    switch(app->edit_field) {
+                        case FIELD_ARTIST:
+                            field = slot->cd.artist;
+                            max_len = MAX_ARTIST_LENGTH;
+                            break;
+                        case FIELD_ALBUM:
+                            field = slot->cd.album;
+                            max_len = MAX_ALBUM_LENGTH;
+                            break;
+                        case FIELD_GENRE:
+                            field = slot->cd.genre;
+                            max_len = MAX_GENRE_LENGTH;
+                            break;
+                        case FIELD_NOTES:
+                            field = slot->cd.notes;
+                            max_len = MAX_NOTES_LENGTH;
+                            break;
+                        default:
+                            break;
+                    }
+                    
+                    if(field && app->edit_char_pos < (int32_t)strlen(field) && app->edit_char_pos < max_len - 1) {
+                        app->edit_char_pos++;
+                        app->edit_char_selection = 0;
+                    }
+                } else if(input_event->key == InputKeyOk) {
+                    // Add/insert character
+                    if(app->edit_field == FIELD_YEAR) {
+                        // Year input (numeric)
+                        if(app->edit_char_selection >= 26 && app->edit_char_selection < 36) {
+                            // Number selected (0-9)
+                            int32_t digit = app->edit_char_selection - 26;
+                            slot->cd.year = slot->cd.year * 10 + digit;
+                            if(slot->cd.year > 9999) slot->cd.year = 9999;
+                        }
+                    } else {
+                        // Text field
+                        char* field = NULL;
+                        int32_t max_len = 0;
+                        
+                        switch(app->edit_field) {
+                            case FIELD_ARTIST:
+                                field = slot->cd.artist;
+                                max_len = MAX_ARTIST_LENGTH;
+                                break;
+                            case FIELD_ALBUM:
+                                field = slot->cd.album;
+                                max_len = MAX_ALBUM_LENGTH;
+                                break;
+                            case FIELD_GENRE:
+                                field = slot->cd.genre;
+                                max_len = MAX_GENRE_LENGTH;
+                                break;
+                            case FIELD_NOTES:
+                                field = slot->cd.notes;
+                                max_len = MAX_NOTES_LENGTH;
+                                break;
+                            default:
+                                break;
+                        }
+                        
+                        if(field && app->edit_char_pos < max_len - 1) {
+                            int32_t len = strlen(field);
+                            char ch = CHAR_SET[app->edit_char_selection % strlen(CHAR_SET)];
+                            
+                            // Insert character at cursor position
+                            if(app->edit_char_pos <= len) {
+                                // Shift existing characters
+                                for(int32_t i = len; i >= app->edit_char_pos && i < max_len - 1; i--) {
+                                    field[i + 1] = field[i];
+                                }
+                                field[app->edit_char_pos] = ch;
+                                field[len + 1] = '\0';
+                                app->edit_char_pos++;
+                            }
+                        }
+                    }
+                } else if(input_event->key == InputKeyBack) {
+                    // Delete character at cursor
+                    if(app->edit_field == FIELD_YEAR) {
+                        // Delete digit from year
+                        slot->cd.year = slot->cd.year / 10;
+                        if(app->edit_char_pos > 0) app->edit_char_pos--;
+                    } else {
+                        char* field = NULL;
+                        
+                        switch(app->edit_field) {
+                            case FIELD_ARTIST: field = slot->cd.artist; break;
+                            case FIELD_ALBUM: field = slot->cd.album; break;
+                            case FIELD_GENRE: field = slot->cd.genre; break;
+                            case FIELD_NOTES: field = slot->cd.notes; break;
+                            default: break;
+                        }
+                        
+                        if(field) {
+                            int32_t len = strlen(field);
+                            if(app->edit_char_pos < len && app->edit_char_pos >= 0) {
+                                // Delete character at cursor
+                                for(int32_t i = app->edit_char_pos; i < len; i++) {
+                                    field[i] = field[i + 1];
+                                }
+                            } else if(app->edit_char_pos > 0 && len > 0) {
+                                // Delete character before cursor
+                                app->edit_char_pos--;
+                                for(int32_t i = app->edit_char_pos; i < len; i++) {
+                                    field[i] = field[i + 1];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            view_port_update(app->view_port);
             break;
+        }
             
         default:
             break;
