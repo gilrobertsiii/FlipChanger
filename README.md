@@ -21,27 +21,30 @@ FlipChanger is an open-source application for the Flipper Zero that helps users 
 - [Development Setup Guide](docs/development_setup.md) - Complete research on Flipper Zero app development
 - [Quick Start Checklist](docs/quick_start_checklist.md) - Get started checklist
 
-## Hello World Test Apps
+## Application Status
 
-Two sample "Hello World" apps are included to test your development setup:
-
-### 1. JavaScript/TypeScript Version (`hello-world-app/`)
-- Uses Flipper Zero JS SDK
-- Requires Node.js
-- See [hello-world-app/README.md](hello-world-app/README.md)
-
-### 2. C/C++ Version with uFBT (`hello-world-ufbt/`) ✅ **RECOMMENDED**
-- Uses uFBT (Micro Flipper Build Tool) - **Already installed!**
-- Native C app - full hardware access
+### ✅ FlipChanger App (`flipchanger-app/`) - **MAIN APP**
+- Core FlipChanger application
+- Slot management (1-200 slots)
+- CD metadata tracking
 - **Quick start:**
   ```bash
-  cd hello-world-ufbt
-  ufbt build    # Build the app
-  ufbt launch   # Deploy and run on device
+  cd flipchanger-app
+  ufbt build APPID=flipchanger    # Build the app
+  ufbt launch APPID=flipchanger   # Deploy and run
   ```
-- See [hello-world-ufbt/README.md](hello-world-ufbt/README.md) for full instructions
+- See [flipchanger-app/README.md](flipchanger-app/README.md) for details
+- **Status**: ✅ Build successful! Core features working.
 
-**Status**: ✅ uFBT installed and tested - build successful!
+### Test Apps
+
+#### 1. C/C++ Hello World (`hello-world-ufbt/`)
+- Simple test app to verify uFBT setup
+- See [hello-world-ufbt/README.md](hello-world-ufbt/README.md)
+
+#### 2. JavaScript/TypeScript Version (`hello-world-app/`)
+- JavaScript SDK test app (requires Node.js)
+- See [hello-world-app/README.md](hello-world-app/README.md)
 
 ## Installation
 

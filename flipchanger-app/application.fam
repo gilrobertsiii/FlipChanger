@@ -1,0 +1,10 @@
+App(
+    appid="flipchanger",
+    apptype=FlipperAppType.EXTERNAL,
+    name="FlipChanger",
+    entry_point="flipchanger_main",
+    fap_category="Tools",
+    requires=["gui", "storage"],
+    stack_size=4096,
+    cdefines=["APP_FLIPCHANGER"],
+)
