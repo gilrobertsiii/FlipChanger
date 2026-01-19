@@ -513,12 +513,8 @@ bool flipchanger_save_data(FlipChangerApp* app) {
     // Write JSON footer
     storage_file_write(file, (const uint8_t*)"]}", 2);
     
-    bool result = true;
-    
-    if(!storage_file_close(file)) {
-        result = false;
-    }
-    
+    // Close file (this should flush automatically)
+    bool result = storage_file_close(file);
     storage_file_free(file);
     
     if(result) {
@@ -1232,47 +1228,52 @@ int32_t flipchanger_main(void* p) {
         furi_delay_ms(100);
     }
     
-    // Save data FIRST (before setting running to false, while everything is valid)
-    if(app->dirty && app->storage) {
-        flipchanger_save_data(app);
-        app->dirty = false;  // Mark as saved
-    }
+    // Exit cleanup sequence (must be in exact order to prevent crashes)
     
-    // NOW set running to false - prevents further callbacks
-    app->running = false;
-    
-    // Remove view port from GUI FIRST (prevents further callbacks)
+    // 1. Remove view port from GUI FIRST - this prevents any further callbacks
     if(app->gui && app->view_port) {
         gui_remove_view_port(app->gui, app->view_port);
     }
     
-    // Clear callbacks before freeing view port
+    // 2. Clear callbacks from view port before freeing
     if(app->view_port) {
         view_port_draw_callback_set(app->view_port, NULL, NULL);
         view_port_input_callback_set(app->view_port, NULL, NULL);
+    }
+    
+    // 3. Set running to false after view port is removed (redundant but safe)
+    app->running = false;
+    
+    // 4. Save data NOW (view port removed, but storage/GUI still valid)
+    if(app->dirty && app->storage) {
+        flipchanger_save_data(app);
+    }
+    
+    // 5. Free view port
+    if(app->view_port) {
         view_port_free(app->view_port);
         app->view_port = NULL;
     }
     
-    // Close GUI record (must be after view port cleanup)
+    // 6. Close GUI record
     if(app->gui) {
         furi_record_close(RECORD_GUI);
         app->gui = NULL;
     }
     
-    // Close notifications
+    // 7. Close notifications
     if(app->notifications) {
         furi_record_close(RECORD_NOTIFICATION);
         app->notifications = NULL;
     }
     
-    // Close storage LAST
+    // 8. Close storage LAST
     if(app->storage) {
         furi_record_close(RECORD_STORAGE);
         app->storage = NULL;
     }
     
-    // Free app structure
+    // 9. Free app structure
     free(app);
     
     return 0;

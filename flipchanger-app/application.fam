@@ -5,6 +5,6 @@ App(
     entry_point="flipchanger_main",
     fap_category="Tools",
     requires=["gui", "storage"],
-    stack_size=2048,
+    stack_size=3072,  # Increased to prevent stack overflow during save
     cdefines=["APP_FLIPCHANGER"],
 )
