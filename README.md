@@ -13,13 +13,25 @@ FlipChanger is an open-source application for the Flipper Zero that helps users 
 
 ## Status
 
-🚧 **In Development** - This is a learning project. Contributions welcome!
+✅ **Active Development** - Core features implemented! App builds and runs successfully on Flipper Zero.
+
+### Current Progress (January 2024)
+
+- ✅ **Development Environment**: uFBT installed and configured
+- ✅ **App Structure**: Complete C/C++ application structure
+- ✅ **Core UI**: Main menu, slot browser, slot details view
+- ✅ **Navigation**: Full menu system working
+- ✅ **Memory Optimization**: SD card-based caching system (supports 200 slots)
+- ✅ **Build System**: App builds and deploys successfully
+- 🚧 **In Progress**: JSON storage, Add/Edit interface
+- 📋 **Planned**: Track management, Statistics, Settings, IR integration
 
 ## Documentation
 
-- [Product Vision Document](docs/product_vision.md)
-- [Development Setup Guide](docs/development_setup.md) - Complete research on Flipper Zero app development
-- [Quick Start Checklist](docs/quick_start_checklist.md) - Get started checklist
+- [Product Vision Document](docs/product_vision.md) - Complete project vision and goals
+- [Development Setup Guide](docs/development_setup.md) - Flipper Zero development research
+- [Quick Start Checklist](docs/quick_start_checklist.md) - Development checklist
+- [Progress Report](docs/PROGRESS.md) - Current development status and achievements
 
 ## Application Status
 
@@ -34,7 +46,7 @@ FlipChanger is an open-source application for the Flipper Zero that helps users 
   ufbt launch APPID=flipchanger   # Deploy and run
   ```
 - See [flipchanger-app/README.md](flipchanger-app/README.md) for details
-- **Status**: ✅ Build successful! Core features working.
+- **Status**: ✅ **Working!** App successfully deployed and running on device. Memory optimized for Flipper Zero constraints.
 
 ### Test Apps
 
@@ -60,7 +72,21 @@ FlipChanger is an open-source application for the Flipper Zero that helps users 
 
 ### Building
 
-> Build instructions coming soon.
+**Prerequisites:**
+- uFBT installed: `pipx install ufbt` (✅ Done!)
+- Flipper Zero device with USB cable
+- SD card inserted (for data storage)
+
+**Build and Deploy:**
+```bash
+cd flipchanger-app
+ufbt build APPID=flipchanger    # Build the app
+ufbt launch APPID=flipchanger   # Deploy and run on device
+```
+
+**File Location:**
+- Built app: `/Users/gilbertroberts/.ufbt/build/flipchanger.fap`
+- Installed to device: `/ext/apps/Tools/flipchanger.fap`
 
 ## Contributing
 

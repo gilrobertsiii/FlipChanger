@@ -15,9 +15,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Maximum number of slots (CDs)
+// Maximum number of slots (CDs) - stored on SD card
 #define MAX_SLOTS 200
 #define MIN_SLOTS 3
+#define DEFAULT_SLOTS 100  // Default number of slots
+
+// Memory cache - only keep visible slots in RAM
+#define SLOT_CACHE_SIZE 10  // Only keep 10 slots in memory at a time
 
 // Maximum string lengths
 #define MAX_STRING_LENGTH 64
@@ -26,7 +30,7 @@
 #define MAX_GENRE_LENGTH 32
 #define MAX_TRACK_TITLE_LENGTH 64
 #define MAX_NOTES_LENGTH 256
-#define MAX_TRACKS 99
+#define MAX_TRACKS 20  // Reduced for memory - can increase later
 
 // File path for data storage
 #define FLIPCHANGER_DATA_PATH "/ext/apps/Tools/flipchanger_data.json"
@@ -63,10 +67,11 @@ typedef struct {
     NotificationApp* notifications;
     Storage* storage;
     
-    // Data
-    Slot slots[MAX_SLOTS];
+    // Data - only cache a few slots in memory, rest on SD card
+    Slot slots[SLOT_CACHE_SIZE];  // Cache for visible slots
     int32_t total_slots;
     int32_t current_slot_index;  // Currently viewing/editing
+    int32_t cache_start_index;   // First cached slot index
     
     // UI State
     enum {

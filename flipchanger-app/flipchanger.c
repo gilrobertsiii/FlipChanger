@@ -11,40 +11,108 @@
 #include <stream/stream.h>
 #include <stream/buffered_file_stream.h>
 
-// Initialize default slots
+// Initialize slots (only cache in memory, full data on SD card)
 void flipchanger_init_slots(FlipChangerApp* app, int32_t total_slots) {
     app->total_slots = (total_slots < MIN_SLOTS) ? MIN_SLOTS : 
                        (total_slots > MAX_SLOTS) ? MAX_SLOTS : total_slots;
     
-    for(int32_t i = 0; i < app->total_slots; i++) {
+    // Only initialize cache slots (memory efficient)
+    for(int32_t i = 0; i < SLOT_CACHE_SIZE; i++) {
         app->slots[i].slot_number = i + 1;
         app->slots[i].occupied = false;
         memset(&app->slots[i].cd, 0, sizeof(CD));
         app->slots[i].cd.track_count = 0;
     }
     
+    app->cache_start_index = 0;
     app->current_slot_index = 0;
     app->selected_index = 0;
     app->scroll_offset = 0;
 }
 
-// Get slot status string
-const char* flipchanger_get_slot_status(FlipChangerApp* app, int32_t slot_index) {
+// Load slot from SD card into cache
+bool flipchanger_load_slot_from_sd(FlipChangerApp* app, int32_t slot_index) {
+    // TODO: Implement loading slot from SD card JSON file
+    // For now, return false (slot not loaded from SD)
+    UNUSED(app);
+    UNUSED(slot_index);
+    return false;
+}
+
+// Save slot to SD card
+bool flipchanger_save_slot_to_sd(FlipChangerApp* app, int32_t slot_index) {
+    // TODO: Implement saving slot to SD card JSON file
+    // For now, return false (slot not saved to SD)
+    UNUSED(app);
+    UNUSED(slot_index);
+    return false;
+}
+
+// Get slot from cache or SD card
+Slot* flipchanger_get_slot(FlipChangerApp* app, int32_t slot_index) {
     if(slot_index < 0 || slot_index >= app->total_slots) {
-        return "Invalid";
+        return NULL;
     }
     
-    if(app->slots[slot_index].occupied) {
-        return app->slots[slot_index].cd.album;
+    // Check if slot is in cache
+    int32_t cache_index = slot_index - app->cache_start_index;
+    if(cache_index >= 0 && cache_index < SLOT_CACHE_SIZE) {
+        return &app->slots[cache_index];
+    }
+    
+    // Slot not in cache - try to load from SD card
+    // For now, return NULL (will implement SD loading)
+    // TODO: Load slot from SD card and update cache
+    return NULL;
+}
+
+// Update cache to include requested slot
+void flipchanger_update_cache(FlipChangerApp* app, int32_t slot_index) {
+    // Calculate new cache start
+    int32_t new_cache_start = slot_index - (SLOT_CACHE_SIZE / 2);
+    if(new_cache_start < 0) {
+        new_cache_start = 0;
+    }
+    if(new_cache_start + SLOT_CACHE_SIZE > app->total_slots) {
+        new_cache_start = app->total_slots - SLOT_CACHE_SIZE;
+        if(new_cache_start < 0) {
+            new_cache_start = 0;
+        }
+    }
+    
+    // Only reload if cache needs to shift
+    if(new_cache_start != app->cache_start_index) {
+        // TODO: Load slots from SD card for new cache range
+        // For now, just update the index
+        app->cache_start_index = new_cache_start;
+    }
+}
+
+// Get slot status string (from cache or SD)
+const char* flipchanger_get_slot_status(FlipChangerApp* app, int32_t slot_index) {
+    Slot* slot = flipchanger_get_slot(app, slot_index);
+    if(!slot) {
+        // Not in cache, try to load
+        flipchanger_load_slot_from_sd(app, slot_index);
+        slot = flipchanger_get_slot(app, slot_index);
+        if(!slot) {
+            return "Empty";  // Default to empty if can't load
+        }
+    }
+    
+    if(slot->occupied) {
+        return slot->cd.album;
     }
     
     return "Empty";
 }
 
-// Count occupied slots
+// Count occupied slots (counts cached slots only - full count from SD card later)
 int32_t flipchanger_count_occupied_slots(FlipChangerApp* app) {
     int32_t count = 0;
-    for(int32_t i = 0; i < app->total_slots; i++) {
+    // Only count cached slots for now
+    // TODO: Count all slots from SD card
+    for(int32_t i = 0; i < SLOT_CACHE_SIZE && i < app->total_slots; i++) {
         if(app->slots[i].occupied) {
             count++;
         }
@@ -58,9 +126,9 @@ bool flipchanger_load_data(FlipChangerApp* app) {
         return false;
     }
     
-    // For now, initialize with default slots
+    // For now, initialize with default slots (reduced for memory)
     // TODO: Implement JSON parsing
-    flipchanger_init_slots(app, 100);  // Default to 100 slots
+    flipchanger_init_slots(app, DEFAULT_SLOTS);  // Default to 20 slots to save memory
     
     // Try to open and read file if it exists
     File* file = storage_file_alloc(app->storage);
@@ -148,11 +216,18 @@ void flipchanger_draw_slot_list(Canvas* canvas, FlipChangerApp* app) {
     canvas_set_font(canvas, FontSecondary);
     int32_t y = 20;
     
+    // Update cache for visible slots
+    flipchanger_update_cache(app, app->selected_index);
+    
     for(int32_t i = start_index; i < end_index; i++) {
-        char line[64];
+        char line[80];  // Increased buffer size
+        Slot* slot = flipchanger_get_slot(app, i);
         
-        if(app->slots[i].occupied) {
-            snprintf(line, sizeof(line), "%ld: %s", (long)(i + 1), app->slots[i].cd.artist);
+        if(slot && slot->occupied) {
+            // Truncate artist name if too long to fit
+            char artist_short[40];
+            snprintf(artist_short, sizeof(artist_short), "%.39s", slot->cd.artist);
+            snprintf(line, sizeof(line), "%ld: %s", (long)(i + 1), artist_short);
         } else {
             snprintf(line, sizeof(line), "%ld: [Empty]", (long)(i + 1));
         }
@@ -186,7 +261,15 @@ void flipchanger_draw_slot_details(Canvas* canvas, FlipChangerApp* app) {
         return;
     }
     
-    Slot* slot = &app->slots[app->current_slot_index];
+    // Get slot from cache or SD card
+    flipchanger_update_cache(app, app->current_slot_index);
+    Slot* slot = flipchanger_get_slot(app, app->current_slot_index);
+    
+    if(!slot) {
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str(canvas, 5, 30, "Slot not loaded");
+        return;
+    }
     
     canvas_set_font(canvas, FontPrimary);
     
@@ -350,16 +433,19 @@ void flipchanger_input_callback(InputEvent* input_event, void* ctx) {
                     }
                 }
             } else if(input_event->key == InputKeyOk) {
+                // Update cache before viewing
+                flipchanger_update_cache(app, app->selected_index);
                 flipchanger_show_slot_details(app, app->selected_index);
             } else if(input_event->key == InputKeyBack) {
                 flipchanger_show_main_menu(app);
             }
             break;
             
-        case VIEW_SLOT_DETAILS:
+        case VIEW_SLOT_DETAILS: {
+            Slot* slot = flipchanger_get_slot(app, app->current_slot_index);
             if(input_event->key == InputKeyOk) {
                 // If empty, go to add. If occupied, go to edit
-                if(!app->slots[app->current_slot_index].occupied) {
+                if(!slot || !slot->occupied) {
                     flipchanger_show_add_edit(app, app->current_slot_index, true);
                 } else {
                     flipchanger_show_add_edit(app, app->current_slot_index, false);
@@ -368,6 +454,7 @@ void flipchanger_input_callback(InputEvent* input_event, void* ctx) {
                 flipchanger_show_slot_list(app);
             }
             break;
+        }
             
         case VIEW_ADD_EDIT_CD:
             // TODO: Handle add/edit input
