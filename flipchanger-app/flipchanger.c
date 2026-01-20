@@ -946,11 +946,28 @@ void flipchanger_draw_add_edit(Canvas* canvas, FlipChangerApp* app) {
 void flipchanger_draw_track_management(Canvas* canvas, FlipChangerApp* app) {
     canvas_clear(canvas);
     
+    // Safety checks
+    if(!app || app->current_slot_index < 0 || app->current_slot_index >= app->total_slots) {
+        canvas_set_font(canvas, FontPrimary);
+        canvas_draw_str(canvas, 5, 30, "Invalid slot");
+        return;
+    }
+    
     Slot* slot = flipchanger_get_slot(app, app->current_slot_index);
     if(!slot) {
         canvas_set_font(canvas, FontPrimary);
         canvas_draw_str(canvas, 5, 30, "Slot not loaded");
         return;
+    }
+    
+    // Ensure track_count is valid
+    if(slot->cd.track_count < 0) slot->cd.track_count = 0;
+    if(slot->cd.track_count > MAX_TRACKS) slot->cd.track_count = MAX_TRACKS;
+    
+    // Ensure selected track is valid
+    if(app->edit_selected_track < 0) app->edit_selected_track = 0;
+    if(slot->cd.track_count > 0 && app->edit_selected_track >= slot->cd.track_count) {
+        app->edit_selected_track = slot->cd.track_count - 1;
     }
     
     canvas_set_font(canvas, FontPrimary);
@@ -965,11 +982,11 @@ void flipchanger_draw_track_management(Canvas* canvas, FlipChangerApp* app) {
     // Show tracks (up to 4 visible)
     int32_t y = 22;
     int32_t start_track = 0;
-    if(app->edit_selected_track >= 4) {
+    if(slot->cd.track_count > 0 && app->edit_selected_track >= 4) {
         start_track = app->edit_selected_track - 3;
     }
     
-    for(int32_t i = start_track; i < slot->cd.track_count && i < start_track + 4; i++) {
+    for(int32_t i = start_track; i < slot->cd.track_count && i < start_track + 4 && i >= 0 && i < MAX_TRACKS; i++) {
         bool is_selected = (i == app->edit_selected_track);
         
         if(is_selected) {
@@ -977,15 +994,17 @@ void flipchanger_draw_track_management(Canvas* canvas, FlipChangerApp* app) {
             canvas_invert_color(canvas);
         }
         
-        // Track number and title
+        // Track number and title - ensure track pointer is valid
         char track_line[80];
-        Track* track = &slot->cd.tracks[i];
-        snprintf(track_line, sizeof(track_line), "%ld. %s", (long)track->number, track->title);
-        canvas_draw_str(canvas, 5, y, track_line);
-        
-        // Duration on right
-        if(strlen(track->duration) > 0) {
-            canvas_draw_str(canvas, 100, y, track->duration);
+        if(i >= 0 && i < MAX_TRACKS) {
+            Track* track = &slot->cd.tracks[i];
+            snprintf(track_line, sizeof(track_line), "%ld. %s", (long)track->number, track->title);
+            canvas_draw_str(canvas, 5, y, track_line);
+            
+            // Duration on right
+            if(strlen(track->duration) > 0) {
+                canvas_draw_str(canvas, 100, y, track->duration);
+            }
         }
         
         if(is_selected) {
@@ -1283,12 +1302,30 @@ void flipchanger_input_callback(InputEvent* input_event, void* ctx) {
         }
             
         case VIEW_TRACK_MANAGEMENT: {
+            // Safety check - ensure slot index is valid
+            if(app->current_slot_index < 0 || app->current_slot_index >= app->total_slots) {
+                if(input_event->key == InputKeyBack) {
+                    app->current_view = VIEW_ADD_EDIT_CD;
+                }
+                break;
+            }
+            
             Slot* slot = flipchanger_get_slot(app, app->current_slot_index);
             if(!slot) {
                 if(input_event->key == InputKeyBack) {
                     app->current_view = VIEW_ADD_EDIT_CD;
                 }
                 break;
+            }
+            
+            // Ensure track_count is valid
+            if(slot->cd.track_count < 0) slot->cd.track_count = 0;
+            if(slot->cd.track_count > MAX_TRACKS) slot->cd.track_count = MAX_TRACKS;
+            
+            // Ensure selected track is valid
+            if(app->edit_selected_track < 0) app->edit_selected_track = 0;
+            if(slot->cd.track_count > 0 && app->edit_selected_track >= slot->cd.track_count) {
+                app->edit_selected_track = slot->cd.track_count - 1;
             }
             
             if(app->editing_track) {
@@ -1322,34 +1359,52 @@ void flipchanger_input_callback(InputEvent* input_event, void* ctx) {
                     }
                 } else if(input_event->key == InputKeyRight) {
                     // Add new track
-                    if(slot->cd.track_count < MAX_TRACKS) {
+                    if(slot->cd.track_count >= 0 && slot->cd.track_count < MAX_TRACKS) {
                         Track* new_track = &slot->cd.tracks[slot->cd.track_count];
-                        new_track->number = slot->cd.track_count + 1;
-                        new_track->title[0] = '\0';
-                        new_track->duration[0] = '\0';
-                        slot->cd.track_count++;
-                        app->edit_selected_track = slot->cd.track_count - 1;
-                        app->dirty = true;
-                        notification_message(app->notifications, &sequence_blink_blue_100);
+                        if(new_track) {
+                            new_track->number = slot->cd.track_count + 1;
+                            new_track->title[0] = '\0';
+                            new_track->duration[0] = '\0';
+                            slot->cd.track_count++;
+                            if(slot->cd.track_count > MAX_TRACKS) slot->cd.track_count = MAX_TRACKS;
+                            app->edit_selected_track = slot->cd.track_count - 1;
+                            if(app->edit_selected_track < 0) app->edit_selected_track = 0;
+                            app->dirty = true;
+                            if(app->notifications) {
+                                notification_message(app->notifications, &sequence_blink_blue_100);
+                            }
+                        }
                     }
                 } else if(input_event->key == InputKeyLeft) {
                     // Delete selected track
-                    if(app->edit_selected_track >= 0 && app->edit_selected_track < slot->cd.track_count) {
+                    if(slot->cd.track_count > 0 && app->edit_selected_track >= 0 && app->edit_selected_track < slot->cd.track_count && app->edit_selected_track < MAX_TRACKS) {
                         // Shift tracks down
-                        for(int32_t i = app->edit_selected_track; i < slot->cd.track_count - 1; i++) {
-                            slot->cd.tracks[i] = slot->cd.tracks[i + 1];
-                            slot->cd.tracks[i].number = i + 1;
+                        for(int32_t i = app->edit_selected_track; i < slot->cd.track_count - 1 && i < MAX_TRACKS - 1; i++) {
+                            if(i + 1 < MAX_TRACKS) {
+                                slot->cd.tracks[i] = slot->cd.tracks[i + 1];
+                                slot->cd.tracks[i].number = i + 1;
+                            }
                         }
                         slot->cd.track_count--;
+                        if(slot->cd.track_count < 0) slot->cd.track_count = 0;
                         if(app->edit_selected_track >= slot->cd.track_count && app->edit_selected_track > 0) {
                             app->edit_selected_track--;
                         }
+                        if(app->edit_selected_track < 0) app->edit_selected_track = 0;
                         app->dirty = true;
-                        notification_message(app->notifications, &sequence_blink_red_100);
+                        if(app->notifications) {
+                            notification_message(app->notifications, &sequence_blink_red_100);
+                        }
                     }
                 } else if(input_event->key == InputKeyBack) {
-                    // Return to Add/Edit view
-                    app->current_view = VIEW_ADD_EDIT_CD;
+                    // Return to Add/Edit view - ensure safe transition
+                    if(app->current_slot_index >= 0 && app->current_slot_index < app->total_slots) {
+                        app->current_view = VIEW_ADD_EDIT_CD;
+                        app->edit_field = FIELD_TRACKS;  // Stay on tracks field
+                    } else {
+                        // Invalid slot, go to slot list instead
+                        app->current_view = VIEW_SLOT_LIST;
+                    }
                 }
             }
             break;
