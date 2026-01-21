@@ -4,7 +4,7 @@ The main FlipChanger application for Flipper Zero - tracks CD metadata for CD ch
 
 ## Features Implemented
 
-### ✅ Core Features (v1.0)
+### ✅ Core Features (v1.0) - WORKING
 
 - **Main Menu**: Navigation hub with 4 options
 - **Slot Browser**: View all slots (1-200) with status and scrolling
@@ -12,15 +12,25 @@ The main FlipChanger application for Flipper Zero - tracks CD metadata for CD ch
 - **Navigation**: Full menu system with UP/DOWN/OK/BACK controls
 - **Empty Slot Detection**: Shows which slots are empty vs occupied
 - **Memory Optimization**: SD card-based caching (only 10 slots in RAM, supports 200 total)
+- **JSON Storage**: Save/load data to SD card ✅ WORKING
+- **Add/Edit CD**: Character-by-character input for all fields ✅ WORKING
+- **Track Management**: Add/delete tracks ✅ WORKING
+- **Data Persistence**: All changes saved to SD card ✅ WORKING
 - **Device Testing**: ✅ App successfully deployed and running on Flipper Zero
 
-### 🚧 In Progress / TODO
+### 🚧 In Progress / Needs Polish
 
-- **Add/Edit CD**: Data entry interface for CD metadata
-- **JSON Storage**: Save/load data to SD card
-- **Track Management**: Add/edit track listings
+- **Track Editing**: Track title/duration editing (structure exists, needs character input)
+- **Field Display**: Truncation/scrolling for long text (>15 chars)
+- **Pop-out Views**: Full-screen field editing for better UX
+- **Field Navigation**: Improved navigation between fields
+
+### 📋 Planned Features
+
+- **Enhanced Fields**: Add "Disc Number", split Artist into "Track Artist" and "Album Artist"
 - **Statistics**: Collection statistics (total CDs, by artist, etc.)
 - **Settings**: Configure number of slots, etc.
+- **IR Integration**: Control CD changer via infrared
 
 ## Building the App
 

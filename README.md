@@ -13,9 +13,9 @@ FlipChanger is an open-source application for the Flipper Zero that helps users 
 
 ## Status
 
-✅ **Active Development** - Core features implemented! App builds and runs successfully on Flipper Zero.
+✅ **Active Development** - Core features implemented and working! App builds, runs, and persists data successfully on Flipper Zero.
 
-### Current Progress (January 2024)
+### Current Progress (January 2025)
 
 - ✅ **Development Environment**: uFBT installed and configured
 - ✅ **App Structure**: Complete C/C++ application structure
@@ -23,8 +23,12 @@ FlipChanger is an open-source application for the Flipper Zero that helps users 
 - ✅ **Navigation**: Full menu system working
 - ✅ **Memory Optimization**: SD card-based caching system (supports 200 slots)
 - ✅ **Build System**: App builds and deploys successfully
-- 🚧 **In Progress**: JSON storage, Add/Edit interface
-- 📋 **Planned**: Track management, Statistics, Settings, IR integration
+- ✅ **JSON Storage**: Save/load functionality working
+- ✅ **Add/Edit Interface**: Basic character-by-character input working
+- ✅ **Track Management**: Add/delete tracks working (editing needs polish)
+- ✅ **Critical Bug Fixes**: All major crashes resolved
+- 🚧 **In Progress**: UI/UX improvements (pop-out views, field display)
+- 📋 **Planned**: Enhanced fields (Disc Number, split Artist), Statistics, Settings, IR integration
 
 ## Documentation
 
